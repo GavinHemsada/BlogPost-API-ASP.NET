@@ -155,4 +155,4 @@ This project is licensed under the [MIT License](LICENSE).
 
 ##  Author
 
-**Gavin Hemsada** – [@yourgithub](https://github.com/yourgithub)
+**Gavin Hemsada** – [@GavinHemsada](https://github.com/GavinHemsada)
