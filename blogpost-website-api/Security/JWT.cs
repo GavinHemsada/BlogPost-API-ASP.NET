@@ -1,5 +1,6 @@
 ﻿using blogpost_website_api.Respons;
 using Microsoft.IdentityModel.Tokens;
+using MongoDB.Driver.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -8,31 +9,30 @@ namespace blogpost_website_api.Security
 {
     public class JWT
     {
-        private readonly JwtSettings jwTSettings;
+        private readonly IConfigurationSection jwtSettings;  
 
-        public JWT(JwtSettings _jwTEntity)
+        public JWT(IConfiguration configuration)
         {
-            jwTSettings = _jwTEntity;
+            jwtSettings =  configuration.GetSection("Jwt");
         }
-        public string GenerateToken(string userId, string username, string email , string role)
+        public string GenerateToken(string userId, string role)
         {
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.NameIdentifier, userId),
-                new Claim(ClaimTypes.Name, username),
+                new Claim(ClaimTypes.NameIdentifier, userId),   
                 new Claim(ClaimTypes.Role, role),
-                new Claim(ClaimTypes.Email, email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwTSettings.SecretKey));
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings["Key"]));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var expiryMinutes = int.TryParse(jwtSettings["ExpiryMinutes"], out int minutes) ? minutes : 60;
 
             var token = new JwtSecurityToken(
-                issuer: jwTSettings.Issuer,
-                audience: jwTSettings.Audience,
+                issuer: jwtSettings["Issuer"],
+                audience: jwtSettings["Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(jwTSettings.ExpiryMinutes),
+                expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
                 signingCredentials: creds
             );
 
@@ -43,14 +43,14 @@ namespace blogpost_website_api.Security
         public ClaimsPrincipal ValidateToken(string token)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(jwTSettings.SecretKey);
+            var key = Encoding.UTF8.GetBytes(jwtSettings["Key"]);
 
             var validationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
-                ValidIssuer = jwTSettings.Issuer,
-                ValidAudience = jwTSettings.Audience,
+                ValidIssuer = jwtSettings["Issuer"],
+                ValidAudience = jwtSettings["Audience"],
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ValidateLifetime = true,
@@ -67,16 +67,12 @@ namespace blogpost_website_api.Security
             if (details != null)
             {
                 var userId = details.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var username = details.FindFirst(ClaimTypes.Name)?.Value;
                 var role = details.FindFirst(ClaimTypes.Role)?.Value;
-                var email = details.FindFirst(ClaimTypes.Email)?.Value;
 
                 // Use dictionary
                 var userdetails = new Dictionary<string, string>
                 {
                     { "userid" , userId },
-                    { "username" , username },
-                    { "email" , email },
                     {"Role",role }
                 };
 

@@ -36,7 +36,7 @@ namespace blogpost_website_api.Service
 
             // Add comment ID to userEntity
             var updateUser = Builders<UserEntity>.Update.Push(p => p.CommentD, comment.Id);
-            await _users.UpdateOneAsync(p => p.Id == commentDTO.PostId, updateUser);
+            await _users.UpdateOneAsync(p => p.Id == commentDTO.UserId, updateUser);
 
             return new respons(true, "Comment added successfully");
         }

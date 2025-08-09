@@ -1,17 +1,24 @@
-﻿using Microsoft.Extensions.Options;
-using MongoDB.Driver;
+﻿using MongoDB.Driver;
 
 namespace blogpost_website_api.DB
 {
     public class MongoDBContext
     {
         private readonly IMongoDatabase _database;
-
-        public MongoDBContext(IOptions<MongoDBSettings> settings)
+        public MongoDBContext(IConfiguration configuration)
         {
-            var client = new MongoClient(settings.Value.ConnectionString);
-            _database = client.GetDatabase(settings.Value.DatabaseName);
-            Console.WriteLine("MongoDB Connected");
+            var connectionString = configuration["MongoDB:ConnectionString"];
+            var databaseName = configuration["MongoDB:DatabaseName"];
+
+            if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(databaseName))
+            {
+                throw new ArgumentException("MongoDB connection string or database name is missing in configuration.");
+            }
+
+            var client = new MongoClient(connectionString);
+            _database = client.GetDatabase(databaseName);
+
+            Console.WriteLine($"✅ MongoDB connected to: {databaseName}");
         }
 
         public IMongoCollection<T> GetCollection<T>(string collectionName)

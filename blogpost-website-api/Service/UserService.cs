@@ -1,4 +1,5 @@
-﻿using blogpost_website_api.DB;
+﻿using blogpost_website_api.Auth;
+using blogpost_website_api.DB;
 using blogpost_website_api.DTO;
 using blogpost_website_api.Entity;
 using blogpost_website_api.Respons;
@@ -32,54 +33,8 @@ namespace blogpost_website_api.Service
             this.jwt = jwt;
         }
 
-        // User register logic
-        public async Task<respons> Register(RegisterDTO registerdto)
-        {
-            try
-            {
-                var existingUser = await _users.Find(u => u.Email == registerdto.Email).FirstOrDefaultAsync();
-                if (existingUser != null) return new respons(false,"Email Already exists");
-
-                var user = new UserEntity
-                {
-                    Username = registerdto.Username,
-                    Email = registerdto.Email,
-                    Password = PasswordProtect.HashPassword(registerdto.Password),
-                    Role = registerdto.Role,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-
-                await _users.InsertOneAsync(user);
-                return new respons(true,"Successfull register");
-            }
-            catch (Exception ex) 
-            {
-                return new respons(false, "error: " + ex.Message);
-            }
-        }
-
-        // User login logic
-        public async Task<respons> Login(LoginDTO logindto)
-        {
-            try
-            {
-                var user = await _users.Find(u => u.Email == logindto.Email).FirstOrDefaultAsync();
-                if (user != null && PasswordProtect.VerifyPassword(logindto.Password, user.Password))
-                {
-                    var token = jwt.GenerateToken(user.Id, user.Username, user.Email, user.Role);
-                    return new respons(true,"Login succesfull" ,token);
-                }
-                return new respons(false, "token is invalid");
-            }
-            catch (Exception ex)
-            {
-                return new respons(false, "error: " + ex.Message);
-            }
-        }
-
         // Create user profile 
-        public async Task<respons> CreateUserProfile(UserProfileDTO userProfileDTO,string token)
+        public async Task<respons> CreateUserProfile(UserProfileDTO userProfileDTO,string token, IFormFile profileImage)
         {
             try
             {
@@ -89,6 +44,23 @@ namespace blogpost_website_api.Service
                     var data = checktoken.Data as Dictionary<string, string>;
                     if (data == null) return new respons(false, "cant find user");
                     var userid = data["userid"];
+                    // Save image to server
+                    string imagePath = null;
+                    if (profileImage != null && profileImage.Length > 0)
+                    {
+                        var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploards/profile_images");
+                        Directory.CreateDirectory(uploadsFolder);
+                        var fileName = Guid.NewGuid() + Path.GetExtension(profileImage.FileName);
+                        var filePath = Path.Combine(uploadsFolder, fileName);
+
+                        using (var stream = new FileStream(filePath, FileMode.Create))
+                        {
+                            await profileImage.CopyToAsync(stream);
+                        }
+
+                        imagePath = "/profile_images/" + fileName; // relative URL
+                    }
+
                     var profile = new UserProfileEntity
                     {
                         UserId = userid,
@@ -99,7 +71,7 @@ namespace blogpost_website_api.Service
                         BirthDate = userProfileDTO.BirthDate,
                         Gender = userProfileDTO.Gender,
                         PhoneNumber = userProfileDTO.PhoneNumber,
-                        ProfileImage = userProfileDTO.ProfileImage,
+                        ProfileImage = imagePath,
                         CreatedAt = DateTime.UtcNow,
                     };
                     await _profile.InsertOneAsync(profile);
@@ -168,7 +140,7 @@ namespace blogpost_website_api.Service
         }
         
         // edit user Profile details
-        public async Task<respons> EditUserProfileDetails(string token, UserProfileDTO userProfileDTO)
+        public async Task<respons> EditUserProfileDetails(string token, UserProfileDTO userProfileDTO, IFormFile profileImage)
         {
             try
             {
@@ -180,6 +152,23 @@ namespace blogpost_website_api.Service
                     var userid = data["userid"];
                     var filter = Builders<UserProfileEntity>.Filter.Eq(p => p.Id, userid);
 
+                    // Save image to server
+                    string imagePath = null;
+                    if (profileImage != null && profileImage.Length > 0)
+                    {
+                        var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploards/profile_images");
+                        Directory.CreateDirectory(uploadsFolder);
+                        var fileName = Guid.NewGuid() + Path.GetExtension(profileImage.FileName);
+                        var filePath = Path.Combine(uploadsFolder, fileName);
+
+                        using (var stream = new FileStream(filePath, FileMode.Create))
+                        {
+                            await profileImage.CopyToAsync(stream);
+                        }
+
+                        imagePath = "/profile_images/" + fileName; // relative URL
+                    }
+
                     var update = Builders<UserProfileEntity>.Update
                         .Set(p => p.Location, userProfileDTO.Location)
                         .Set(p => p.Website, userProfileDTO.Website)
@@ -188,7 +177,7 @@ namespace blogpost_website_api.Service
                         .Set(p => p.BirthDate, userProfileDTO.BirthDate)
                         .Set(p => p.Gender, userProfileDTO.Gender)
                         .Set(p => p.PhoneNumber, userProfileDTO.PhoneNumber)
-                        .Set(p => p.ProfileImage, userProfileDTO.ProfileImage)
+                        .Set(p => p.ProfileImage, imagePath)
                         .Set(p => p.LastUpdatedAt, DateTime.UtcNow);
 
                     var result = await _profile.UpdateOneAsync(filter, update);
@@ -215,7 +204,25 @@ namespace blogpost_website_api.Service
                     var data = checktoken.Data as Dictionary<string, string>;
                     if (data == null) return new respons(false, "cant find user");
                     var userid = data["userid"];
-                    await _profile.DeleteOneAsync(p=>p.UserId.Equals(userid));
+
+                    // Step 1: Get the user profile to retrieve the image path
+                    var userProfile = await _profile.Find(p => p.UserId == userid).FirstOrDefaultAsync();
+
+                    if (userProfile != null && !string.IsNullOrEmpty(userProfile.ProfileImage))
+                    {
+                        //  Construct full file path from relative path
+                        var imageRelativePath = userProfile.ProfileImage.TrimStart('/'); // e.g. "profile_images/abc123.jpg"
+                        var fullImagePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploards", imageRelativePath);
+
+                        //  Delete the image file from folder
+                        if (System.IO.File.Exists(fullImagePath))
+                        {
+                            System.IO.File.Delete(fullImagePath);
+                        }
+                    }
+                    //  Delete profile document from MongoDB
+                    await _profile.DeleteOneAsync(p => p.UserId == userid);
+
                     await _otp.DeleteManyAsync(o =>o.UserID.Equals(userid));
                     await _notification.DeleteManyAsync(n => n.UserID.Equals(userid));
                     await _comment.DeleteManyAsync(n => n.UserId.Equals(userid));
